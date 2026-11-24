@@ -337,30 +337,4 @@ void StudioRoomModelerAudioProcessor::processBlock (juce::AudioBuffer<float>& bu
     }
 
     // 3. Ganancia de salida
-    float outGain = juce::Decibels::decibelsToGain (*apvts.getRawParameterValue ("outputGain"));
-    buffer.applyGain (outGain);
-}
-
-juce::AudioProcessorEditor* StudioRoomModelerAudioProcessor::createEditor()
-{
-    return new juce::GenericAudioProcessorEditor (*this);
-}
-
-void StudioRoomModelerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
-{
-    auto state = apvts.copyState();
-    std::unique_ptr<juce::XmlElement> xml (state.createXml());
-    copyXmlToBinary (*xml, destData);
-}
-
-void StudioRoomModelerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
-{
-    std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
-    if (xmlState && xmlState->hasTagName (apvts.state.getType()))
-        apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
-}
-
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new StudioRoomModelerAudioProcessor();
-}
+    float outGain = juce::Decibels::decibels
