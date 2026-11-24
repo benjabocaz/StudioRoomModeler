@@ -1,0 +1,43 @@
+name: Build Audio Plugin
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build Plugin
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload macOS Plugins (AU & VST3)
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudioRoomModeler-macOS
+          path: |
+            build/StudioRoomModeler_artefacts/Release/AU/Studio Room Modeler.component
+            build/StudioRoomModeler_artefacts/Release/VST3/Studio Room Modeler.vst3
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build
+
+      - name: Build Plugin
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload Windows Plugin (VST3)
+        uses: actions/upload-artifact@v4
+        with:
+          name: StudioRoomModeler-Windows
+          path: build/StudioRoomModeler_artefacts/Release/VST3/Studio Room Modeler.vst3
