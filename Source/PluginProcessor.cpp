@@ -144,63 +144,8 @@ void StudioRoomModelerAudioProcessor::updateDSPParameters()
     float presFreq = 4000.0f, presDb = 0.0f, airDb = 0.0f;
     switch (micIdx)
     {
-        case 0: presFreq = 3200.0f; presDb = 2.0f; airDb = -0.5f; break; // U48
-        case 1: presFreq = 5000.0f; presDb = 1.5f; airDb = 3.5f;  break; // C12
-        case 2: presFreq = 2500.0f; presDb = 1.0f; airDb = -1.5f; break; // U67
-        case 3: presFreq = 6000.0f; presDb = 2.5f; airDb = 2.0f;  break; // M50
-        case 4: presFreq = 4500.0f; presDb = 2.0f; airDb = 4.5f;  break; // C800G
-    }
-
-    *micLowShelf.state = *juce::dsp::IIR::Coefficients<float>::makeLowShelf  (sr, 160.0f, 0.7f, juce::Decibels::decibelsToGain (proximityBoostDb));
-    *micPresence.state = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (sr, presFreq, 1.4f, juce::Decibels::decibelsToGain (presDb));
-    *micAir.state      = *juce::dsp::IIR::Coefficients<float>::makeHighShelf (sr, 10000.0f, 0.7f, juce::Decibels::decibelsToGain (airDb));
-
-    // 3. Room Parameters
-    int roomIdx = static_cast<int> (*apvts.getRawParameterValue ("room"));
-    int modeIdx = static_cast<int> (*apvts.getRawParameterValue ("mode"));
-
-    juce::dsp::Reverb::Parameters roomParams;
-    roomParams.roomSize = (roomIdx == 0) ? 0.72f : 0.42f;
-    roomParams.damping  = (roomIdx == 0) ? 0.35f : 0.55f;
-    roomParams.width    = 1.0f;
-    roomParams.wetLevel = (modeIdx == 1) ? juce::jmap (dist, 0.25f, 0.85f) : juce::jmap (dist, 0.1f, 0.55f);
-    roomParams.dryLevel = (modeIdx == 1) ? juce::jmap (dist, 0.85f, 0.20f) : 1.0f;
-    roomReverb.setParameters (roomParams);
-
-    // 4. Echo Chamber Parameters
-    float chMix   = *apvts.getRawParameterValue ("chamberMix");
-    float chDecay = *apvts.getRawParameterValue ("chamberDecay");
-
-    juce::dsp::Reverb::Parameters chamberParams;
-    chamberParams.roomSize = juce::jmap (chDecay, 0.35f, 0.96f);
-    chamberParams.damping  = 0.45f;
-    chamberParams.width    = 0.85f;
-    chamberParams.wetLevel = chMix;
-    chamberParams.dryLevel = 1.0f;
-    chamberReverb.setParameters (chamberParams);
-
-    *chamberHPF.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass (sr, 180.0f);
-    *chamberLPF.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass  (sr, 6500.0f);
-
-    // 5. Console EQ & Compressor
-    float eqL = *apvts.getRawParameterValue ("eqLow");
-    float eqM = *apvts.getRawParameterValue ("eqMid");
-    float eqH = *apvts.getRawParameterValue ("eqHigh");
-
-    *consoleLow.state  = *juce::dsp::IIR::Coefficients<float>::makeLowShelf   (sr, 100.0f, 0.7f, juce::Decibels::decibelsToGain (eqL));
-    *consoleMid.state  = *juce::dsp::IIR::Coefficients<float>::makePeakFilter (sr, 1200.0f, 1.0f, juce::Decibels::decibelsToGain (eqM));
-    *consoleHigh.state = *juce::dsp::IIR::Coefficients<float>::makeHighShelf  (sr, 8000.0f, 0.7f, juce::Decibels::decibelsToGain (eqH));
-
-    int compType = static_cast<int> (*apvts.getRawParameterValue ("compType"));
-    float thresh = *apvts.getRawParameterValue ("compThresh");
-    compressor.setThreshold (thresh);
-
-    if (compType == 1)      { compressor.setRatio (4.0f); compressor.setAttack (1.5f);  compressor.setRelease (60.0f);  } // 1176LN
-    else if (compType == 2) { compressor.setRatio (3.0f); compressor.setAttack (12.0f); compressor.setRelease (250.0f); } // LA-2A
-    else if (compType == 3) { compressor.setRatio (2.0f); compressor.setAttack (20.0f); compressor.setRelease (180.0f); } // Mastering
-}
-
-void StudioRoomModelerAudioProcessor::processSourceStage (juce::AudioBuffer<float>& buffer)
+        case 0: presFreq = 3200.0
+    void StudioRoomModelerAudioProcessor::processSourceStage (juce::AudioBuffer<float>& buffer)
 {
     juce::dsp::AudioBlock<float> block (buffer);
     juce::dsp::ProcessContextReplacing<float> ctx (block);
@@ -232,4 +177,135 @@ void StudioRoomModelerAudioProcessor::processMicStage (juce::AudioBuffer<float>&
     micAir.process (ctx);
 }
 
-void StudioRoomModelerAudioProcessor
+void StudioRoomModelerAudioProcessor::processRoomAndDeccaStage (juce::AudioBuffer<float>& buffer)
+{
+    juce::dsp::AudioBlock<float> block (buffer);
+    juce::dsp::ProcessContextReplacing<float> ctx (block);
+    roomReverb.process (ctx);
+
+    // Matriz Mid/Side para controlar el balance Center / Sides del Decca Tree
+    float width = *apvts.getRawParameterValue ("deccaWidth");
+    if (buffer.getNumChannels() >= 2)
+    {
+        auto* left  = buffer.getWritePointer (0);
+        auto* right = buffer.getWritePointer (1);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            float mid  = 0.5f * (left[i] + right[i]);
+            float side = 0.5f * (left[i] - right[i]) * width;
+            left[i]  = mid + side;
+            right[i] = mid - side;
+        }
+    }
+}
+
+void StudioRoomModelerAudioProcessor::processChamberStage (juce::AudioBuffer<float>& buffer)
+{
+    float mix = *apvts.getRawParameterValue ("chamberMix");
+    if (mix <= 0.001f) return;
+
+    juce::AudioBuffer<float> chamberBuf;
+    chamberBuf.makeCopyOf (buffer);
+
+    float preDelayMs = *apvts.getRawParameterValue ("chamberPreDelay");
+    float delaySamples = static_cast<float> (preDelayMs * 0.001 * currentSampleRate);
+    preDelay.setDelay (juce::jlimit (0.0f, 47999.0f, delaySamples));
+
+    for (int ch = 0; ch < chamberBuf.getNumChannels(); ++ch)
+    {
+        auto* data = chamberBuf.getWritePointer (ch);
+        for (int i = 0; i < chamberBuf.getNumSamples(); ++i)
+        {
+            preDelay.pushSample (ch, data[i]);
+            data[i] = preDelay.popSample (ch);
+        }
+    }
+
+    juce::dsp::AudioBlock<float> block (chamberBuf);
+    juce::dsp::ProcessContextReplacing<float> ctx (block);
+    chamberHPF.process (ctx);
+    chamberLPF.process (ctx);
+    chamberReverb.process (ctx);
+
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        buffer.addFrom (ch, 0, chamberBuf, ch, 0, buffer.getNumSamples(), mix);
+}
+
+void StudioRoomModelerAudioProcessor::processConsoleEQStage (juce::AudioBuffer<float>& buffer)
+{
+    juce::dsp::AudioBlock<float> block (buffer);
+    juce::dsp::ProcessContextReplacing<float> ctx (block);
+    consoleLow.process (ctx);
+    consoleMid.process (ctx);
+    consoleHigh.process (ctx);
+}
+
+void StudioRoomModelerAudioProcessor::processCompressorStage (juce::AudioBuffer<float>& buffer)
+{
+    int compType = static_cast<int> (*apvts.getRawParameterValue ("compType"));
+    if (compType == 0) return;
+
+    juce::dsp::AudioBlock<float> block (buffer);
+    juce::dsp::ProcessContextReplacing<float> ctx (block);
+    compressor.process (ctx);
+}
+
+void StudioRoomModelerAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    juce::ScopedNoDenormals noDenormals;
+    updateDSPParameters();
+
+    // 1. Entrada física: Fuente -> Sala -> Micrófono
+    processSourceStage (buffer);
+    processRoomAndDeccaStage (buffer);
+    processMicStage (buffer);
+
+    // 2. Cadena modular reordenable (Consola EQ, Compresor, Cámara)
+    int order = static_cast<int> (*apvts.getRawParameterValue ("chainOrder"));
+    if (order == 0) // EQ -> Comp -> Chamber
+    {
+        processConsoleEQStage (buffer);
+        processCompressorStage (buffer);
+        processChamberStage (buffer);
+    }
+    else if (order == 1) // Comp -> EQ -> Chamber
+    {
+        processCompressorStage (buffer);
+        processConsoleEQStage (buffer);
+        processChamberStage (buffer);
+    }
+    else // Chamber -> Comp -> EQ
+    {
+        processChamberStage (buffer);
+        processCompressorStage (buffer);
+        processConsoleEQStage (buffer);
+    }
+
+    // 3. Ganancia de salida
+    float outGain = juce::Decibels::decibelsToGain (*apvts.getRawParameterValue ("outputGain"));
+    buffer.applyGain (outGain);
+}
+
+juce::AudioProcessorEditor* StudioRoomModelerAudioProcessor::createEditor()
+{
+    return new StudioRoomModelerAudioProcessorEditor (*this);
+}
+
+void StudioRoomModelerAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    auto state = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    copyXmlToBinary (*xml, destData);
+}
+
+void StudioRoomModelerAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
+    if (xmlState && xmlState->hasTagName (apvts.state.getType()))
+        apvts.replaceState (juce::ValueTree::fromXml (*xmlState));
+}
+
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new StudioRoomModelerAudioProcessor();
+}
